@@ -1,0 +1,77 @@
+name: iGPSport to Garmin Sync
+
+on:
+  schedule:
+    # Alle 3 Stunden, Minute 17 (UTC). Seltener = weniger Logins und Minuten.
+    - cron: '17 */3 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Nur anzeigen, nichts hochladen'
+        type: boolean
+        default: false
+      lookback_days:
+        description: 'Wie viele Tage zurueck pruefen (z. B. 90 zum Nachholen)'
+        type: number
+        default: 7
+
+# Minimale Rechte: Code lesen, sonst nichts. Kein Schreibzugriff aufs Repo.
+permissions:
+  contents: read
+
+# Nie zwei Laeufe gleichzeitig (verhindert doppelte Uploads).
+concurrency:
+  group: igpsport-garmin-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      # Alle Actions sind auf einen festen Commit gepinnt, nicht auf Tags/Branches.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Garmin-Tokens aus Cache holen
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: garmin_tokens
+          key: garmin-tokens-${{ github.run_id }}
+          restore-keys: garmin-tokens-
+
+      - name: Abhaengigkeiten installieren (feste Versionen + Hash-Pruefung)
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet --no-deps --require-hashes --only-binary :all: -r requirements.txt
+
+      - name: Sync ausfuehren
+        env:
+          IGPSPORT_USERNAME: ${{ secrets.IGPSPORT_USERNAME }}
+          IGPSPORT_PASSWORD: ${{ secrets.IGPSPORT_PASSWORD }}
+          IGPSPORT_REGION: ${{ secrets.IGPSPORT_REGION }}
+          GARMIN_TOKENS: ${{ secrets.GARMIN_TOKENS }}
+          GARMIN_TOKEN_DIR: garmin_tokens
+          LOOKBACK_DAYS: ${{ inputs.lookback_days || 7 }}
+          LOCAL_TZ: Europe/Berlin
+          DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+        run: .venv/bin/python sync.py
+
+      - name: Pruefen, ob Tokens vorhanden sind
+        id: tokens
+        if: always()
+        run: |
+          if [ -f garmin_tokens/garmin_tokens.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Aufgefrischte Garmin-Tokens im Cache speichern
+        if: always() && steps.tokens.outputs.present == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: garmin_tokens
+          key: garmin-tokens-${{ github.run_id }}
+
