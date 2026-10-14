@@ -26,6 +26,9 @@ concurrency:
 
 jobs:
   sync:
+    # In der Vorlage selbst nie laufen (dort gibt es keine Secrets).
+    # In deiner Kopie aus "Use this template" laeuft der Job ganz normal.
+    if: github.repository != 'freddy366/IGPSport_toGarmin_Connect'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
